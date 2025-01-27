@@ -3,7 +3,7 @@ import numpy as np
 import math
 import pyomo.environ as pyo
 import pyomo.opt as po
-
+ 
 
 class optimizer:
     def __init__(self, solverpath_exe="/usr/bin/glpsol"):
@@ -27,8 +27,8 @@ class optimizer:
             return self.solver
         except Exception as e:
             raise RuntimeError(f"Error setting GLPK solver: {e}")
-
-    def step1_optimize_daa(self, n_cycles: int, energy_cap: int, power_cap: int, daa_price_vector: list):
+        
+    def step1_optimize_daa(self, n_cycles: int, energy_cap: int, power_cap: int, transaction_cost: float, daa_price_vector: list):
         """
         Calculates optimal charge/discharge schedule on the day-ahead auction (daa) for a given 96-d daa_price_vector.
 
@@ -189,11 +189,11 @@ class optimizer:
         # Define objective function and solve the optimization problem.
         # The objective is to maximize revenue from DA Auction trades over all possible charge-discharge schedules.
 
-        model.obj = pyo.Objective(expr=sum(power_cap/4 * daa_price_vector[q-1] * (
-            model.dis_daa[q] - model.cha_daa[q]) for q in model.Q), sense=pyo.maximize)
+        model.obj = pyo.Objective(expr=sum(power_cap/4 * daa_price_vector[q-1] * ( model.dis_daa[q] - model.cha_daa[q]) for q in model.Q) - sum( transaction_cost * power_cap/4 * (model.cha_daa[q] + model.dis_daa[q])
+        for q in model.Q ), sense=pyo.maximize)
 
         solver = self.set_glpk_solver()
-        solver.solve(model, timelimit=5)
+        solver.solve(model, timelimit=5000)
 
         # Retrieve arrays of resulting optimal soc/charge/discharge schedules after the DA Auction:
 
@@ -211,7 +211,7 @@ class optimizer:
 
         return(step1_soc_daa, step1_cha_daa, step1_dis_daa, step1_profit_daa)
 
-    def step2_optimize_ida(self, n_cycles: int, energy_cap: int, power_cap: int, ida_price_vector: list, step1_cha_daa: list, step1_dis_daa: list):
+    def step2_optimize_ida(self, n_cycles: int, energy_cap: int, power_cap: int, transaction_cost: float,  ida_price_vector: list, step1_cha_daa: list, step1_dis_daa: list):
         """
         Calculates optimal charge/discharge schedule on the intraday auction (ida) for a given 96-d ida_price_vector.
 
@@ -340,7 +340,7 @@ class optimizer:
              Sum of dis_ida[q] and dis_daa[q] has to be less or equal to 1. (Constraint 2.11)
              """
             return model.dis_ida[q] + step1_dis_daa[q-1] <= 1
-
+    
         # Apply constraints on the model:
 
         model.set_maximum_soc = pyo.Constraint(
@@ -360,15 +360,18 @@ class optimizer:
             model.Q, rule=charge_rate_limit)
         model.discharge_rate_limit = pyo.Constraint(
             model.Q, rule=discharge_rate_limit)
+        
 
         # Define objective function and solve the optimization problem
         # The objective is to maximize revenue from ID Auction trades over all possible charge-discharge schedules.
 
         model.obj = pyo.Objective(expr=sum(ida_price_vector[q-1] * power_cap/4 * (
-            model.dis_ida[q] + model.dis_ida_close[q] - model.cha_ida[q] - model.cha_ida_close[q]) for q in model.Q), sense=pyo.maximize)
+            model.dis_ida[q] + model.dis_ida_close[q] - model.cha_ida[q] - model.cha_ida_close[q]) for q in model.Q)    - sum(
+        transaction_cost * power_cap/4 * (model.cha_ida[q] + model.dis_ida[q])
+        for q in model.Q ), sense=pyo.maximize)
 
         solver = self.set_glpk_solver()
-        solver.solve(model, timelimit=5)
+        solver.solve(model, timelimit=5000)
 
         # Retrieve arrays of resulting optimal soc/charge/discharge schedules after the ID Auction:
 
@@ -397,7 +400,7 @@ class optimizer:
 
         return(step2_soc_ida, step2_cha_ida, step2_dis_ida, step2_cha_ida_close, step2_dis_ida_close, step2_profit_ida, step2_cha_daaida, step2_dis_daaida)
 
-    def step3_optimize_idc(self, n_cycles: int, energy_cap: int, power_cap: int, idc_price_vector: list, step2_cha_daaida: list, step2_dis_daaida: list):
+    def step3_optimize_idc(self, n_cycles: int, energy_cap: int, power_cap: int, transaction_cost: float, idc_price_vector: list, step2_cha_daaida: list, step2_dis_daaida: list):
         """
         Calculates optimal charge/discharge schedule on the intraday continuous (idc) for a given 96-d idc_price_vector.
 
@@ -552,7 +555,9 @@ class optimizer:
         # The objective is to maximize revenue from ID Continuous trades over all possible charge-discharge schedules.
 
         model.obj = pyo.Objective(expr=sum([idc_price_vector[q-1] * power_cap/4 * (
-            model.dis_idc[q]+model.dis_idc_close[q]-model.cha_idc[q]-model.cha_idc_close[q]) for q in model.Q]), sense=pyo.maximize)
+            model.dis_idc[q]+model.dis_idc_close[q]-model.cha_idc[q]-model.cha_idc_close[q]) for q in model.Q]) - sum(
+        transaction_cost * power_cap/4 * (model.cha_idc[q] + model.dis_idc[q])
+        for q in model.Q ), sense=pyo.maximize)
 
         solver = self.set_glpk_solver()
         solver.solve(model, timelimit=5)
