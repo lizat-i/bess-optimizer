@@ -6,16 +6,27 @@ import pyomo.opt as po
 
 
 class optimizer:
-    def __init__(self, solverpath_exe):
+    def __init__(self, solverpath_exe="/usr/bin/glpsol"):
+        """
+        Initializes the optimizer with the path to the GLPK solver executable.
+        Defaults to '/usr/bin/glpsol' (as verified on your system).
+        """
         self.solverpath_exe = solverpath_exe
+        self.solver = None
 
     def set_glpk_solver(self):
         """
-        Sets the solver to be used to the GLPK solver.
-        Note that you have to install the GLPK solver on your machine to run the optimization model.
-        It is available here: https://www.gnu.org/software/glpk/
+        Sets the solver to GLPK and verifies the executable.
         """
-        return pyo.SolverFactory("glpk", executable=self.solverpath_exe)
+        try:
+            # Set up the GLPK solver
+            self.solver = pyo.SolverFactory("glpk", executable=self.solverpath_exe)
+            if not self.solver.available(exception_flag=False):
+                raise RuntimeError(f"GLPK solver not available or executable is invalid: {self.solverpath_exe}")
+            print(f"GLPK solver successfully set: {self.solverpath_exe}")
+            return self.solver
+        except Exception as e:
+            raise RuntimeError(f"Error setting GLPK solver: {e}")
 
     def step1_optimize_daa(self, n_cycles: int, energy_cap: int, power_cap: int, daa_price_vector: list):
         """
